@@ -1,0 +1,9 @@
+setup.cfg
+setup.py
+scripts\jmxfuse
+src\jmx_fuse\__init__.py
+src\jmx_fuse\core.py
+src\jmx_fuse\fs.py
+src\jmx_fuse\jolokiaparser.py
+src\jmx_fuse\mx4jparser.py
+src\jmx_fuse\tm.py
