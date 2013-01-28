@@ -25,7 +25,17 @@ class NullHandler(logging.Handler):
 log = logging.getLogger(__name__)
 log.addHandler(NullHandler())
 
+
+def get_json(response):
+        """ Early versions of requests library do not include built-in json support """
+        unicode_text = response.text
+        return json.loads(unicode_text)
+    
+
 class Mbean_Attribute_Write_Exception(Exception):
+    pass
+
+class Mbean_Operation_Exec_Exception(Exception):
     pass
 
 class Mbean_Server_Exception(Exception):
@@ -155,28 +165,14 @@ class mbean_operation(object):
 
     def invoke(self, parameters=None):
         raise NotImplementedError()
+    
+    def get_paramters(self):
+        return self.params
 
 class Jolokia_mbean_operation(mbean_operation):
               
-    def get_paramters(self):
-        return self.params
-            
     def invoke(self, parameters=None):
-        pass
-    
-class mbean_operation_invoke_result:
-    """ The result from an mbean operation """
-    def __init__(self, result_xml):
-        self.result_xml = result_xml
-        
-    def get_result(self):
-        return self.result_xml.get("result")
-    
-    def get_error_msg(self):
-        return self.result_xml.get("errorMsg")
-    
-    def __str__(self):
-        return self.get_result()
+        return self.mbean.server.invoke_mbean_operation(self.mbean, self.name, parameters)
         
 class mbean_operation_parameter(object):
     """ An mbean operation parameter/arguments """ 
@@ -227,7 +223,7 @@ class Jolokia_server(mserver):
         
     def get_mbeans(self):
         r = requests.get("%s/list?maxDepth=2" % self.url)
-        json = r.json
+        json = get_json(r)
         for (top_level_name, sub_names) in json["value"].items():
             for sub_name in sub_names:
                 mbean_name = "%s:%s" % (top_level_name, sub_name)
@@ -248,7 +244,7 @@ class Jolokia_server(mserver):
         (mbean_domain, mbean_name) = self._split_mbean_name(mbean)
         r = requests.get("%s/list/%s/%s/attr" % (self.url, self._escape_mbean_name(mbean_domain), self._escape_mbean_name(mbean_name)))
         
-        rjson = r.json
+        rjson = get_json(r)
         for (attribute_name, attribute_details) in rjson["value"].items():
             writable = attribute_details["rw"]
             yield Jolokia_mbean_attribute(attribute_name, mbean, read=True, write=writable)
@@ -256,7 +252,7 @@ class Jolokia_server(mserver):
     def get_mbean_attribute_value(self, name, mbean):
         mbean_name = mbean.name
         r = requests.get("%s/read/%s/%s" % (self.url, self._escape_mbean_name(mbean_name), name))
-        value = r.json["value"]
+        value = get_json(r)["value"]
         # If value is a list or a dictionary then Jolokia has kindly deserialised the value.
         # We will simple return it as a line fed string
         if isinstance(value, (dict,list)):
@@ -268,14 +264,15 @@ class Jolokia_server(mserver):
         def get_params_from_args(arg_list):
             result = []
             for arg in arg_list:
-                    param = mbean_operation_parameter(arg["type"], arg["name"], arg["desc"])
-                    result.append(param)
+                param = mbean_operation_parameter(arg["type"], arg["name"], arg["desc"])
+                result.append(param)
+            return result
         
         (mbean_domain, mbean_name) = self._split_mbean_name(mbean)
         r = requests.get("%s/list/%s/%s/op" % (self.url, self._escape_mbean_name(mbean_domain),
                                                self._escape_mbean_name(mbean_name)) )
         
-        rjson = r.json
+        rjson = get_json(r)
         for (op_name, op_item) in rjson["value"].items():
             
             if isinstance(op_item, dict):
@@ -291,6 +288,7 @@ class Jolokia_server(mserver):
             
          
     def set_mbean_attribute_value(self, name, value, mbean):
+        # TODO, change arg order to match invoke_ops 
         value = value.strip()
         post_data = { "type": "write", "attribute":name, "value": value, "mbean": mbean.name}
         post_data_json = json.dumps(post_data)
@@ -298,10 +296,39 @@ class Jolokia_server(mserver):
         
         r = requests.post(self.url, post_data_json)
         
-        result_json = r.json
+        result_json = get_json(r)
         if result_json.has_key("error"):
             raise Mbean_Attribute_Write_Exception(result_json["error"])
         return r
+    
+    def invoke_mbean_operation(self, mbean, op_name, params):
+        sig_args = [] 
+        args = []
+        if params:
+            for param in params:
+                sig_args.append(param.get_type() )
+                args.append(param.get_request_value)
+            
+        operation = "%s(%s)" % (op_name, ",".join(sig_args))
+        
+        request_obj = {"type": "EXEC", 
+                       "mbean": mbean.name,
+                       "operation": operation,
+                       "arguments": args
+                       }
+        
+        post_data_json = json.dumps(request_obj)
+        log.debug(post_data_json)
+        
+        r = requests.post(self.url, post_data_json)       
+        result_json = get_json(r)
+        
+        if result_json.has_key("error"):
+            raise Mbean_Operation_Exec_Exception(result_json["error"])
+        
+        if result_json.has_key("value"):
+            log.debug("Value: %s" % result_json["value"])
+            return result_json["value"]
     
     def test(self):
         # Test connection
@@ -311,10 +338,10 @@ class Jolokia_server(mserver):
         except Exception, e:
             raise Mbean_Server_Exception( e )
         
-        if r.json["status"] != 200:
+        if get_json(r)["status"] != 200:
             message = r.text
-            if "error" in r.json:
-                message = r.json["error"]
+            if "error" in get_json(r):
+                message = get_json(r)["error"]
                 
             raise Mbean_Server_Exception( message )
         return True

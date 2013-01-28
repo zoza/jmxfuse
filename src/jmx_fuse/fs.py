@@ -21,6 +21,14 @@ import fuse #@UnresolvedImport
 import errno
 from datetime import datetime
 import tm
+from jmx_fuse.jolokiaparser import Mbean_Operation_Exec_Exception
+
+class NullHandler(logging.Handler):
+    def emit(self, record):
+        pass
+    
+log = logging.getLogger(__name__)
+log.addHandler(NullHandler())
 
 class FS_Object(object):
     path = None
@@ -170,9 +178,7 @@ class mbean_directory(directory):
             
             self.add_child(classname_file)
             self.add_child(description_file)
-            self.add_child(object_name_file)
-        except httplib.BadStatusLine:
-                error_file_contents += "Bad Status from Server. Possible bad mbean\n%s\n" % sys.exc_info()[1]  
+            self.add_child(object_name_file)  
         except Exception:
                 error_file_contents += traceback.format_exc()
                 
@@ -265,6 +271,7 @@ class mbean_operation_usage_file(file):
         self.mbean_operation = self.mbean_op_method_dir.mbean_operation
         
         self.parameters = self.mbean_operation.get_paramters()
+        log.debug("Parameters: %s", self.parameters)
         self.__set_header()
         
     def __set_header(self):
@@ -285,8 +292,10 @@ Usage: echo %s[identifier] > invoke
 
 """ % (mbean_name, self.mbean_operation.get_name(), self.mbean_operation.get_description(), self.mbean_operation.get_return_type(), args_string)
 
-        self.contents += """Arguments:\n"""    
+        
         if self.parameters:
+            self.contents += """Arguments:\n"""
+            # TODO Use a table formatter to have this nicely aligned
             for param in self.parameters:
                 arg_name = '%s' % param.get_name().replace(" ", "_")                
                 self.contents += "\t%s\t(%s)\t%s\n" % (arg_name, param.get_type(), param.get_description() )
@@ -333,9 +342,7 @@ class mbean_operation_invoke_file(file):
         logging.debug("offset: %s" % offset)
         
         dt = datetime.now()
-        
         timestamp = dt.isoformat()
-        unique_id = ""
         
         if self.parameters:
             no_req_params = len(self.parameters)
@@ -348,7 +355,21 @@ class mbean_operation_invoke_file(file):
         value_fh.seek(offset)
         
         value = value_fh.getvalue().strip()
-        args = re.split("\s", value)
+        if value:
+            args = re.split("\s", value)
+        else:
+            args = []
+        
+        unique_id_re = re.compile("jmxfuseid:(.*)")
+        unique_id = ""
+        
+        for arg in args:
+            match = unique_id_re.match(arg)
+            if match:
+                unique_id = match.group(1)
+                log.debug("Unique_id found: %s" % unique_id)
+                args.remove(arg)
+                
         
         logging.debug("Number of supplied args: %s" % len(args))
         logging.debug(args)
@@ -358,36 +379,28 @@ class mbean_operation_invoke_file(file):
             self.mbean_op_method_dir.write_to_error_file("%s Invalid usage. Not enough arguments %s\n" % (timestamp, value))
             return - errno.EINVAL
         
-        if len(args) > no_req_params + 1:
+        if len(args) > no_req_params:
             logging.error("Too many arguments")
             self.mbean_op_method_dir.write_to_error_file("%s Invalid usage. Too many arguments: %s\n" % (timestamp, value))
             return - errno.EINVAL
         
-        if len(args) == no_req_params + 1:
-            unique_id = args.pop()
-            
-        if args:
-            for arg_pos in xrange(len(args)):
-                parameter = self.parameters[arg_pos]
-                parameter.set_request_value(args[arg_pos])
-                
-            result = self.mbean_operation.invoke(self.parameters)
-        else:
-            result = self.mbean_operation.invoke()
-        
-        results_error = result.get_error_msg()
-        results_text = result.get_result()
-        
-        if results_error:
-            message_text = "%s %s" % (results_error, results_text)
-        else:
-            message_text = results_text
-    
-        results_message = "%s %s: %s\n" % (timestamp, unique_id, message_text)
+        try:    
+            if args:
+                for arg_pos in xrange(len(args)):
+                    parameter = self.parameters[arg_pos]
+                    parameter.set_request_value(args[arg_pos])
+                    
+                result = self.mbean_operation.invoke(self.parameters)
+            else:
+                result = self.mbean_operation.invoke()
+        except Mbean_Operation_Exec_Exception, e:
+                result = e.message
+
+        results_message = "%s %s: %s\n" % (timestamp, unique_id, result or "")
         self.mbean_op_method_dir.write_to_results_file(results_message)
-            
+                
         return len(buf)
-            
+
 
 class mbean_attribute(file):
     attribute = None
