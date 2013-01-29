@@ -307,7 +307,7 @@ class Jolokia_server(mserver):
         if params:
             for param in params:
                 sig_args.append(param.get_type() )
-                args.append(param.get_request_value)
+                args.append(param.get_request_value())
             
         operation = "%s(%s)" % (op_name, ",".join(sig_args))
         

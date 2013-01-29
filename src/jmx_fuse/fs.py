@@ -288,7 +288,7 @@ Operation: %s
 Description: %s
 Return Type: %s
 
-Usage: echo %s[identifier] > invoke
+Usage: echo %s[jmxfuseid:identifier] > invoke
 
 """ % (mbean_name, self.mbean_operation.get_name(), self.mbean_operation.get_description(), self.mbean_operation.get_return_type(), args_string)
 
