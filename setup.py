@@ -3,7 +3,7 @@
 from distutils.core import setup
    
 setup(name='jmxfuse',
-      version="1.0-SNAPSHOT",
+      version="0.2",
       description='A JMX Mbeans filesystem',
       author='Alastair McCormack',
       author_email='alastair.mccormack@mcc-net.co.uk',
