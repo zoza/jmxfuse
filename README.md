@@ -1,4 +1,4 @@
-Automatically exported from code.google.com/p/jmxfuse
+Automatically exported from <http://code.google.com/p/jmxfuse>
 
 
 jmxfuse is a python-fuse filesystem which exposes Mbeans attributes and Operations as file objects right from the shell. Read attributes using cat and invoke methods using vi. You could call it "proc for JMX"!
